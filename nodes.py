@@ -47,6 +47,88 @@ foley_models_dir = os.path.join(folder_paths.models_dir, "foley")
 if "foley" not in folder_paths.folder_names_and_paths:
     folder_paths.folder_names_and_paths["foley"] = ([foley_models_dir], folder_paths.supported_pt_extensions)
 
+def get_fallback_foley_dir(primary_dir: str):
+    """Get fallback foley directory if primary doesn't exist or has no models
+    
+    Args:
+        primary_dir: Primary foley directory path
+        
+    Returns:
+        Fallback directory path or None
+    """
+    # Check if primary is in ssd_models, then fallback to comfyui-gpu-*/models/foley
+    if "ssd_models" in primary_dir:
+        import re
+        
+        # Extract the base path before ssd_models
+        base_path = primary_dir.split("ssd_models")[0]
+        
+        # Try to find any comfyui-gpu-* directory
+        if os.path.exists(base_path):
+            try:
+                # List directories and look for comfyui-gpu-* or comfyui-cpu-* patterns
+                for item in os.listdir(base_path):
+                    item_path = os.path.join(base_path, item)
+                    if os.path.isdir(item_path):
+                        # Check for comfyui-gpu-* pattern (e.g., comfyui-gpu-9000, comfyui-gpu-9001)
+                        if re.match(r'^comfyui-gpu-\d+$', item):
+                            fallback_dir = primary_dir.replace("ssd_models", f"{item}/models")
+                            if os.path.exists(fallback_dir):
+                                logger.info(f"Using fallback foley directory: {fallback_dir}")
+                                return fallback_dir
+                
+                # If no GPU directory found, try CPU directories
+                for item in os.listdir(base_path):
+                    item_path = os.path.join(base_path, item)
+                    if os.path.isdir(item_path):
+                        # Check for comfyui-cpu-* pattern (e.g., comfyui-cpu-9000, comfyui-cpu-9001)
+                        if re.match(r'^comfyui-cpu-\d+$', item):
+                            fallback_dir = primary_dir.replace("ssd_models", f"{item}/models")
+                            if os.path.exists(fallback_dir):
+                                logger.info(f"Using fallback foley directory: {fallback_dir}")
+                                return fallback_dir
+            except (PermissionError, OSError):
+                pass
+        
+        # Fallback to original hardcoded paths if pattern matching fails
+        fallback_dir = primary_dir.replace("ssd_models", "comfyui-gpu-9000/models")
+        if os.path.exists(fallback_dir):
+            logger.info(f"Using fallback foley directory: {fallback_dir}")
+            return fallback_dir
+        
+        fallback_dir = primary_dir.replace("ssd_models", "comfyui-cpu-9000/models")
+        if os.path.exists(fallback_dir):
+            logger.info(f"Using fallback foley directory: {fallback_dir}")
+            return fallback_dir
+    
+    return None
+
+def get_foley_model_dir():
+    """Get foley model directory with fallback support for ssd_models
+    
+    Returns:
+        Path to the foley models directory
+    """
+    # Get the primary directory from folder_paths
+    try:
+        primary_dir = folder_paths.get_folder_paths("foley")[0]
+    except (IndexError, KeyError):
+        primary_dir = os.path.join(folder_paths.models_dir, "foley")
+    
+    # If path contains ssd_models, try fallback first (even if primary exists)
+    if "ssd_models" in primary_dir:
+        fallback_dir = get_fallback_foley_dir(primary_dir)
+        if fallback_dir and os.path.exists(fallback_dir):
+            logger.info(f"Using foley models directory from fallback location: {fallback_dir}")
+            return fallback_dir
+    
+    # If the primary directory exists, use it
+    if os.path.exists(primary_dir):
+        return primary_dir
+    
+    # Return original path (will be created if needed)
+    return primary_dir
+
 # Import the HunyuanVideo-Foley modules
 try:
     from hunyuanvideo_foley.utils.model_utils import load_model
@@ -256,7 +338,7 @@ class HunyuanVideoFoleyNode:
 
             # His default path logic
             if not model_path.strip():
-                foley_models_dir = folder_paths.get_folder_paths("foley")[0]
+                foley_models_dir = get_foley_model_dir()
                 model_path = os.path.join(foley_models_dir, "hunyuanvideo-foley-xxl")
 
             # His auto-downloader logic
@@ -643,10 +725,10 @@ class HunyuanVideoFoleyModelLoader:
         try:
             # Set default paths
             if not model_path or not model_path.strip():
-                foley_models_dir = folder_paths.folder_names_and_paths.get("foley", [None])[0]
-                if foley_models_dir and len(foley_models_dir) > 0:
+                foley_models_dir = get_foley_model_dir()
+                if foley_models_dir:
                     # Check for the model in the hunyuanvideo-foley-xxl subdirectory
-                    model_path = os.path.join(foley_models_dir[0], "hunyuanvideo-foley-xxl")
+                    model_path = os.path.join(foley_models_dir, "hunyuanvideo-foley-xxl")
                 else:
                     current_dir = os.path.dirname(os.path.abspath(__file__))
                     model_path = os.path.join(current_dir, "pretrained_models")
